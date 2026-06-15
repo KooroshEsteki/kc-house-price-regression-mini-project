@@ -1,0 +1,387 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, PolynomialFeatures
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.compose import TransformedTargetRegressor
+
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.svm import LinearSVR, SVR
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+
+
+# 
+# STEP 1: Read the dataset
+# 
+
+DATA_PATH = "kc_house_data.csv"
+
+df = pd.read_csv(DATA_PATH)
+
+print("Dataset shape:")
+print(df.shape)
+
+print("\nFirst five rows:")
+print(df.head())
+
+print("\nColumn names:")
+print(df.columns.tolist())
+
+print("\nMissing values:")
+print(df.isna().sum())
+
+df = df.dropna()
+
+print("\nShape after dropping missing values:")
+print(df.shape)
+
+
+#
+# STEP 2: Read and prepare the dataset
+#
+
+# Target column
+target = "price"
+
+# Convert date to datetime and extract useful date features
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+df["sale_year"] = df["date"].dt.year
+df["sale_month"] = df["date"].dt.month
+
+df = df.dropna()
+
+# Columns to ignore based on project instruction
+columns_to_ignore = [
+    "id",
+    "date",
+    "price",
+    "view",
+    "yr_renovated",
+    "lat",
+    "long"
+]
+
+features = [
+    col for col in df.columns
+    if col not in columns_to_ignore
+]
+
+X = df[features]
+y = df[target]
+
+print("\nSelected features:")
+print(features)
+
+print("\nFeature matrix shape:")
+print(X.shape)
+
+print("\nTarget shape:")
+print(y.shape)
+
+
+# 
+# STEP 3: Encode categorical data and prepare preprocessing
+# 
+
+# Zipcode is categorical, even though it is stored as a number
+categorical_features = ["zipcode"]
+
+numeric_features = [
+    col for col in features
+    if col not in categorical_features
+]
+
+print("\nNumeric features:")
+print(numeric_features)
+
+print("\nCategorical features:")
+print(categorical_features)
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", StandardScaler(), numeric_features),
+        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features)
+    ]
+)
+
+
+# 
+# STEP 4: Split the data
+# 80% training
+# 20% testing
+#
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=7
+)
+
+print("\nTraining set:")
+print(X_train.shape, y_train.shape)
+
+print("\nTesting set:")
+print(X_test.shape, y_test.shape)
+
+
+# 
+# Helper function for model evaluation
+# 
+
+def evaluate_model(model_name, model, X_train, X_test, y_train, y_test):
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_test, y_pred)
+
+    print("\n====================================================")
+    print(model_name)
+    print("====================================================")
+
+    print("R2 score:")
+    print(round(r2, 4))
+
+    print("MSE:")
+    print(round(mse, 2))
+
+    print("RMSE:")
+    print(round(rmse, 2))
+
+    print("MAE:")
+    print(round(mae, 2))
+
+    return {
+        "model": model_name,
+        "r2_score": r2,
+        "mse": mse,
+        "rmse": rmse,
+        "mae": mae,
+        "trained_model": model
+    }
+
+
+# 
+# STEP 5: Build and train regression models
+# 
+
+results = []
+
+models = [
+    (
+        "Multiple Linear Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", LinearRegression())
+            ]
+        )
+    ),
+    (
+        "Polynomial Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("polynomial", PolynomialFeatures(degree=2, include_bias=False)),
+                ("regressor", Ridge(alpha=1.0))
+            ]
+        )
+    ),
+    (
+        "KNN Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", KNeighborsRegressor(n_neighbors=7))
+            ]
+        )
+    ),
+    (
+        "Linear Support Vector Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", LinearSVR(max_iter=10000, random_state=7))
+            ]
+        )
+    ),
+    (
+        "Non-Linear Support Vector Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", SVR(kernel="rbf", C=100, gamma="scale"))
+            ]
+        )
+    ),
+    (
+        "Decision Tree Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", DecisionTreeRegressor(
+                    max_depth=12,
+                    random_state=7
+                ))
+            ]
+        )
+    ),
+    (
+        "Random Forest Regression",
+        Pipeline(
+            steps=[
+                ("preprocessor", preprocessor),
+                ("regressor", RandomForestRegressor(
+                    n_estimators=200,
+                    max_depth=18,
+                    random_state=7,
+                    n_jobs=-1
+                ))
+            ]
+        )
+    )
+]
+
+
+# Use log transformation of house price to improve regression performance
+for model_name, base_model in models:
+    model = TransformedTargetRegressor(
+        regressor=base_model,
+        func=np.log1p,
+        inverse_func=np.expm1
+    )
+
+    result = evaluate_model(
+        model_name,
+        model,
+        X_train,
+        X_test,
+        y_train,
+        y_test
+    )
+
+    results.append(result)
+
+
+# 
+# STEP 6: Compare model results
+# 
+
+results_df = pd.DataFrame([
+    {
+        "model": item["model"],
+        "r2_score": item["r2_score"],
+        "mse": item["mse"],
+        "rmse": item["rmse"],
+        "mae": item["mae"]
+    }
+    for item in results
+])
+
+print("\n====================================================")
+print("Final Model Comparison")
+print("====================================================")
+
+print(results_df.sort_values(by="r2_score", ascending=False))
+
+best_result = max(results, key=lambda x: x["r2_score"])
+best_model_name = best_result["model"]
+best_model = best_result["trained_model"]
+
+print("\nBest model:")
+print(best_model_name)
+
+print("\nBest model R2 score:")
+print(round(best_result["r2_score"], 4))
+
+
+# 
+# STEP 7: Plot model comparison
+# 
+
+plt.figure(figsize=(12, 6))
+plt.bar(results_df["model"], results_df["r2_score"])
+plt.xlabel("Regression Model")
+plt.ylabel("R2 Score")
+plt.title("Regression Model Comparison")
+plt.xticks(rotation=35, ha="right")
+plt.tight_layout()
+plt.savefig("regression_model_comparison.png")
+plt.show()
+
+print("\nRegression comparison plot saved as:")
+print("regression_model_comparison.png")
+
+
+# 
+# STEP 8: Estimate a new house price
+#
+# Example:
+# 3-bedroom, 2-bathroom, 1-level home in Kenmore, WA
+# Zip code: 98028
+#
+# For missing house details, use median values from similar homes.
+# 
+
+similar_homes = df[
+    (df["zipcode"] == 98028) &
+    (df["bedrooms"] == 3) &
+    (df["bathrooms"] >= 1.75) &
+    (df["bathrooms"] <= 2.25) &
+    (df["floors"] == 1)
+]
+
+if len(similar_homes) > 0:
+    reference_values = similar_homes[features].median(numeric_only=True)
+else:
+    reference_values = df[features].median(numeric_only=True)
+
+new_house = pd.DataFrame([{
+    "bedrooms": 3,
+    "bathrooms": 2,
+    "sqft_living": reference_values.get("sqft_living", df["sqft_living"].median()),
+    "sqft_lot": reference_values.get("sqft_lot", df["sqft_lot"].median()),
+    "waterfront": 0,
+    "condition": reference_values.get("condition", df["condition"].median()),
+    "grade": reference_values.get("grade", df["grade"].median()),
+    "sqft_above": reference_values.get("sqft_above", df["sqft_above"].median()),
+    "sqft_basement": reference_values.get("sqft_basement", df["sqft_basement"].median()),
+    "yr_built": reference_values.get("yr_built", df["yr_built"].median()),
+    "zipcode": 98028,
+    "sqft_living15": reference_values.get("sqft_living15", df["sqft_living15"].median()),
+    "sqft_lot15": reference_values.get("sqft_lot15", df["sqft_lot15"].median()),
+    "sale_year": df["sale_year"].max(),
+    "sale_month": df["sale_month"].max()
+}])
+
+# Make sure new_house has exactly the same feature order
+new_house = new_house[features]
+
+predicted_price = best_model.predict(new_house)[0]
+
+print("\n====================================================")
+print("New House Price Estimate")
+print("====================================================")
+
+print("House description:")
+print("3 bedrooms, 2 bathrooms, 1 floor, Kenmore WA, zipcode 98028")
+
+print("\nPredicted price using best model:")
+print(f"${predicted_price:,.2f}")
+
+print("\nNote:")
+print(
+    "This is a model-based estimate using historical King County house sales data. "
+    "It is not adjusted to today's real estate market."
+)
